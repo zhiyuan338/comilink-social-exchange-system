@@ -7,6 +7,10 @@ import {
   PrismaClient,
   SocialLinkType,
 } from "../app/generated/prisma/client";
+import {
+  generateUserToken,
+  isLegacySeedToken,
+} from "../app/lib/user-token";
 
 const loadEnvFile = (
   process as typeof process & {
@@ -79,6 +83,22 @@ function buildSocialLinks(
   return links;
 }
 
+async function createUniqueUserToken() {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const token = generateUserToken();
+    const existingUser = await prisma.user.findUnique({
+      where: { token },
+      select: { id: true },
+    });
+
+    if (!existingUser) {
+      return token;
+    }
+  }
+
+  throw new Error("Could not generate a unique user token.");
+}
+
 async function seedEvents() {
   await prisma.event.updateMany({
     where: { isActive: true },
@@ -121,24 +141,38 @@ async function seedUsers() {
     const userNumber = getUserNumber(index);
     const qq = String(TEST_QQ_START + index - 1);
     const passwordHash = await bcrypt.hash(qq, PASSWORD_SALT_ROUNDS);
-    const user = await prisma.user.upsert({
+
+    const existingUser = await prisma.user.findUnique({
       where: { qq },
-      update: {
-        passwordHash,
-        username: `TestUser${userNumber}`,
-        token: `test-user-${userNumber}`,
-        isAdmin: false,
-        isDisabled: false,
-      },
-      create: {
-        qq,
-        passwordHash,
-        username: `TestUser${userNumber}`,
-        token: `test-user-${userNumber}`,
-        isAdmin: false,
-        isDisabled: false,
-      },
+      select: { id: true, token: true },
     });
+
+    const userUpdateData: Prisma.UserUpdateInput = {
+      passwordHash,
+      username: `TestUser${userNumber}`,
+      isAdmin: false,
+      isDisabled: false,
+    };
+
+    if (existingUser && isLegacySeedToken(existingUser.token)) {
+      userUpdateData.token = await createUniqueUserToken();
+    }
+
+    const user = existingUser
+      ? await prisma.user.update({
+          where: { id: existingUser.id },
+          data: userUpdateData,
+        })
+      : await prisma.user.create({
+          data: {
+            qq,
+            passwordHash,
+            username: `TestUser${userNumber}`,
+            token: await createUniqueUserToken(),
+            isAdmin: false,
+            isDisabled: false,
+          },
+        });
 
     await prisma.socialLink.deleteMany({
       where: { userId: user.id },
