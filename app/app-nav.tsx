@@ -20,6 +20,12 @@ export default async function AppNav() {
               >
                 我的资料
               </Link>
+              <Link
+                className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50"
+                href="/me/collections"
+              >
+                Collections
+              </Link>
               <LogoutButton />
             </>
           ) : (
